@@ -1,0 +1,166 @@
+<?php
+require_once 'db.php';
+
+// معالجة طلبات AJAX (الإضافة أو التبديل)
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
+    
+    // 1. عملية الإضافة (Insert)
+    if (isset($_POST['action']) && $_POST['action'] === 'insert') {
+        $name = trim($_POST['name'] ?? '');
+        $age = intval($_POST['age'] ?? 0);
+        if (!empty($name) && $age > 0) {
+            $stmt = $pdo->prepare("INSERT INTO users (name, age, status) VALUES (?, ?, 0)");
+            $stmt->execute([$name, $age]);
+            echo json_encode(['success' => true]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'بيانات غير صالحة']);
+        }
+        exit;
+    }
+
+    // 2. عملية التبديل (Toggle Status)
+    if (isset($_POST['action']) && $_POST['action'] === 'toggle') {
+        $id = intval($_POST['id'] ?? 0);
+        if ($id > 0) {
+            $stmt = $pdo->prepare("SELECT status FROM users WHERE id = ?");
+            $stmt->execute([$id]);
+            $row = $stmt->fetch();
+            if ($row) {
+                $newStatus = $row['status'] == 1 ? 0 : 1;
+                $update = $pdo->prepare("UPDATE users SET status = ? WHERE id = ?");
+                $update->execute([$newStatus, $id]);
+                echo json_encode(['success' => true, 'new_status' => $newStatus]);
+                exit;
+            }
+        }
+        echo json_encode(['success' => false]);
+        exit;
+    }
+}
+
+// جلب البيانات لعرضها في الجدول
+$stmt = $pdo->query("SELECT * FROM users ORDER BY id DESC");
+$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+?>
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>إدارة المستخدمين</title>
+    <style>
+        body { font-family: Tahoma, sans-serif; background: #f4f7f6; margin: 0; padding: 20px; direction: rtl; }
+        .container { max-width: 600px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; }
+        form { display: flex; gap: 10px; margin-bottom: 20px; }
+        input { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        button[type="submit"] { padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button[type="submit"]:hover { background: #218838; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+        th { background: #f8f9fa; }
+        .btn-toggle { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; color: white; font-weight: bold; }
+        .status-0 { background: #dc3545; }
+        .status-1 { background: #28a745; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>إدارة المستخدمين والحالات</h2>
+        
+        <!-- الفورم -->
+        <form id="userForm">
+            <input type="text" id="name" placeholder="الاسم" required>
+            <input type="number" id="age" placeholder="العمر" required>
+            <button type="submit">إرسال</button>
+        </form>
+
+        <!-- الجدول -->
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>الاسم</th>
+                    <th>العمر</th>
+                    <th>الحالة (Status)</th>
+                    <th>التحكم (Toggle)</th>
+                </tr>
+            </thead>
+            <tbody id="usersTableBody">
+                <?php foreach ($users as $user): ?>
+                <tr id="row-<?= $user['id'] ?>">
+                    <td><?= $user['id'] ?></td>
+                    <td><?= htmlspecialchars($user['name']) ?></td>
+                    <td><?= $user['age'] ?></td>
+                    <td class="status-text"><?= $user['status'] ?></td>
+                    <td>
+                        <button class="btn-toggle <?= $user['status'] == 1 ? 'status-1' : 'status-0' ?>" 
+                                onclick="toggleStatus(<?= $user['id'] ?>)">
+                            <?= $user['status'] == 1 ? 'مفعل (1)' : 'معطل (0)' ?>
+                        </button>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // إرسال البيانات وإضافتها بدون إعادة تحميل الصفحة
+        document.getElementById('userForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            let name = document.getElementById('name').value;
+            let age = document.getElementById('age').value;
+
+            let formData = new FormData();
+            formData.append('action', 'insert');
+            formData.append('name', name);
+            formData.append('age', age);
+
+            fetch('index.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('حدث خطأ أثناء الحفظ');
+                }
+            });
+        });
+
+        // زر التبديل (Toggle) لتغيير الحالة مباشرة أمام المستخدم
+        function toggleStatus(id) {
+            let formData = new FormData();
+            formData.append('action', 'toggle');
+            formData.append('id', id);
+
+            fetch('index.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    let row = document.getElementById('row-' + id);
+                    let statusText = row.querySelector('.status-text');
+                    let btn = row.querySelector('.btn-toggle');
+                    
+                    statusText.textContent = data.new_status;
+                    if (data.new_status == 1) {
+                        btn.textContent = 'مفعل (1)';
+                        btn.className = 'btn-toggle status-1';
+                    } else {
+                        btn.textContent = 'معطل (0)';
+                        btn.className = 'btn-toggle status-0';
+                    }
+                } else {
+                    alert('فشل تحديث الحالة');
+                }
+            });
+        }
+    </script>
+</body>
+</html>
